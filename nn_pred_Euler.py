@@ -84,11 +84,11 @@ class Net(nn.Module):
         
         x1 = self.tanh(self.il(x))
         x2 = self.tanh(self.hidden1(x1))
- #       x3 = self.tanh(self.hidden2(x2))
- #       x4 = self.tanh(self.hidden3(x3))
- #       x5 = self.tanh(self.hidden4(x4))
- #       x6 = self.tanh(self.hidden5(x5))
-        out =self.ol(x2)
+        x3 = self.tanh(self.hidden2(x2))
+        x4 = self.tanh(self.hidden3(x3))
+        x5 = self.tanh(self.hidden4(x4))
+        x6 = self.tanh(self.hidden5(x5))
+        out =self.ol(x6)
         return out
 
 
@@ -123,7 +123,7 @@ for ep in range(0, epochs+1):
           print('Epoch', ep)
           print ('Loss', loss)
 
-torch.save(mynet.state_dict(),'BNN_one_layer_Eulerstep_lead'+str(lead)+'.pt') 
+torch.save(mynet.state_dict(),'BNN_Eulerstep_lead'+str(lead)+'.pt') 
 
 
 M=20000
@@ -144,7 +144,7 @@ for k in range(0,M):
 matfiledata = {}
 matfiledata[u'prediction'] = pred
 matfiledata[u'Truth'] = label_test 
-hdf5storage.write(matfiledata, '.', path_outputs+'predicted_one_layer_KS_Eulerstep_lead'+str(lead)+'.mat', matlab_compatible=True)
+hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Eulerstep_lead'+str(lead)+'.mat', matlab_compatible=True)
 
 print('Saved Predictions')
 
