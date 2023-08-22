@@ -14,9 +14,9 @@ import hdf5storage
 import pickle
 
 
-path_outputs = '/home/exouser/RK4_analysis/KS_stuff/new_outputs/'
+path_outputs = '/media/volume/sdb/RK4_analysis/KS_stuff/new_outputs/'
 
-with open('/home/exouser/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
+with open('/media/volume/sdb/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
     data = pickle.load(f)
 
 
@@ -34,21 +34,6 @@ input_test_torch = torch.from_numpy(np.transpose(data[:,trainN:])).float().cuda(
 label_test_torch = torch.from_numpy(np.transpose(data[:,trainN+lead:])).float().cuda()
 label_test = np.transpose(data[:,trainN+lead:])
 
-
-
-
-def spectral_loss (output, target):
-
-   loss1 = torch.mean((output-target)**2)
-   
-   out_fft = torch.fft.rfft(output,dim=1)
-   target_fft = torch.fft.rfft(target,dim=1)
-   
-   loss2 = torch.mean(torch.abs(out_fft[:,wavenum_init:] - target_fft[:,wavenum_init:]))
-
-   loss = (1-lamda_reg)*loss1 + 100*lamda_reg*loss2
-  
-   return loss
 
 def RK4step(net,input_batch):
  output_1 = net(input_batch.cuda())
@@ -99,20 +84,19 @@ class Net(nn.Module):
         
         x1 = self.tanh(self.il(x))
         x2 = self.tanh(self.hidden1(x1))
-        x3 = self.tanh(self.hidden2(x2))
-        x4 = self.tanh(self.hidden3(x3))
-        x5 = self.tanh(self.hidden4(x4))
-        x6 = self.tanh(self.hidden5(x5))
-        out =self.ol(x6)
+ #       x3 = self.tanh(self.hidden2(x2))
+ #       x4 = self.tanh(self.hidden3(x3))
+ #       x5 = self.tanh(self.hidden4(x4))
+ #       x6 = self.tanh(self.hidden5(x5))
+        out =self.ol(x2)
         return out
 
 
 mynet = Net()
 count_parameters(mynet)
 mynet.cuda()
-epochs = 600
-wavenum_init = 60
-lamda_reg = 0.20
+epochs = 60
+
 loss_fn = nn.MSELoss()
 #use two optimizers.  learing rates seem to work.
 optimizer = optim.SGD(mynet.parameters(), lr=0.005)
@@ -126,21 +110,20 @@ for ep in range(0, epochs+1):
       for step in range(0,trainN,batch_size):
         indices = np.random.permutation(np.arange(start=step, step=1,stop=step+batch_size))
         input_batch, label_batch = input_train_torch[indices], label_train_torch[indices]
- #       print('shape of input_batch',input_batch.shape)
         #pick a random boundary batch
         optimizer.zero_grad()
-        outputs = Eulerstep(mynet,input_batch)
-        loss = spectral_loss(outputs,label_batch)
+        outputs = directstep(mynet,input_batch)
+        loss = loss_fn(outputs,label_batch)
   
         loss.backward(retain_graph=True)
         optimizer.step()
    #     epoch_loss = epoch_loss + loss
-        if ep % 100 == 0:
+        if ep % 10 == 0:
           print('step',step)
           print('Epoch', ep)
           print ('Loss', loss)
 
-torch.save(mynet.state_dict(),'BNN_Spectral_Loss_Eulerstep_lead'+str(lead)+'.pt') 
+torch.save(mynet.state_dict(),'BNN_one_layer_directstep_lead'+str(lead)+'.pt') 
 
 
 M=20000
@@ -149,19 +132,19 @@ for k in range(0,M):
  
     if (k==0):
 
-        out = Eulerstep(mynet,input_test_torch[0,:])
+        out = directstep(mynet,input_test_torch[0,:])
         pred [k,:] = out.detach().cpu().numpy()
 
     else:
 
-        out = Eulerstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
+        out = directstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
 
         pred [k,:] = out.detach().cpu().numpy()
 
 matfiledata = {}
 matfiledata[u'prediction'] = pred
 matfiledata[u'Truth'] = label_test 
-hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Spectral_Loss_Eulerstep_lead'+str(lead)+'.mat', matlab_compatible=True)
+hdf5storage.write(matfiledata, '.', path_outputs+'predicted_one_layer_KS_directstep_lead'+str(lead)+'.mat', matlab_compatible=True)
 
 print('Saved Predictions')
 

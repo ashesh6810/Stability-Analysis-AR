@@ -14,9 +14,9 @@ import hdf5storage
 import pickle
 
 
-path_outputs = '/home/exouser/RK4_analysis/KS_stuff/new_outputs/'
+path_outputs = '/media/volume/sdb/RK4_analysis/KS_stuff/new_outputs/'
 
-with open('/home/exouser/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
+with open('/media/volume/sdb/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
     data = pickle.load(f)
 
 
@@ -29,6 +29,8 @@ output_size = 512
 hidden_layer_size = 1000
 input_train_torch = torch.from_numpy(np.transpose(data[:,0:trainN])).float().cuda()
 label_train_torch = torch.from_numpy(np.transpose(data[:,lead:lead+trainN])).float().cuda()
+
+
 
 input_test_torch = torch.from_numpy(np.transpose(data[:,trainN:])).float().cuda()
 label_test_torch = torch.from_numpy(np.transpose(data[:,trainN+lead:])).float().cuda()
@@ -46,7 +48,7 @@ def spectral_loss (output, target):
    
    loss2 = torch.mean(torch.abs(out_fft[:,wavenum_init:] - target_fft[:,wavenum_init:]))
 
-   loss = (1-lamda_reg)*loss1 + 100*lamda_reg*loss2
+   loss = (1-lamda_reg)*loss1 + lamda_reg*loss2
   
    return loss
 
@@ -67,6 +69,16 @@ def Eulerstep(net,input_batch):
 def directstep(net,input_batch):
   output_1 = net(input_batch.cuda())
   return output_1
+
+def PECstep(net,input_batch):
+ output_1 = net(input_batch.cuda()) + input_batch.cuda()
+ return input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_1))
+
+def PEC4step(net,input_batch):
+ output_1 = time_step*net(input_batch.cuda()) + input_batch.cuda()
+ output_2 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_1))
+ output_3 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_2))
+ return input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_3))
 
 class Net(nn.Module):
     def __init__(self):
@@ -110,9 +122,9 @@ class Net(nn.Module):
 mynet = Net()
 count_parameters(mynet)
 mynet.cuda()
-epochs = 600
-wavenum_init = 60
-lamda_reg = 0.20
+epochs = 60
+wavenum_init = 100
+lamda_reg = 0 
 loss_fn = nn.MSELoss()
 #use two optimizers.  learing rates seem to work.
 optimizer = optim.SGD(mynet.parameters(), lr=0.005)
@@ -129,18 +141,18 @@ for ep in range(0, epochs+1):
  #       print('shape of input_batch',input_batch.shape)
         #pick a random boundary batch
         optimizer.zero_grad()
-        outputs = Eulerstep(mynet,input_batch)
+        outputs = PECstep(mynet,input_batch)
         loss = spectral_loss(outputs,label_batch)
   
         loss.backward(retain_graph=True)
         optimizer.step()
    #     epoch_loss = epoch_loss + loss
-        if ep % 100 == 0:
+        if ep % 10 == 0:
           print('step',step)
           print('Epoch', ep)
           print ('Loss', loss)
 
-torch.save(mynet.state_dict(),'BNN_Spectral_Loss_Eulerstep_lead'+str(lead)+'.pt') 
+torch.save(mynet.state_dict(),'BNN_Spectral_Loss_'+'lambda_reg'+str(lamda_reg)+'_PECstep_lead'+str(lead)+'.pt') 
 
 
 M=20000
@@ -149,19 +161,19 @@ for k in range(0,M):
  
     if (k==0):
 
-        out = Eulerstep(mynet,input_test_torch[0,:])
+        out = PECstep(mynet,input_test_torch[0,:])
         pred [k,:] = out.detach().cpu().numpy()
 
     else:
 
-        out = Eulerstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
+        out = PECstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
 
         pred [k,:] = out.detach().cpu().numpy()
 
 matfiledata = {}
 matfiledata[u'prediction'] = pred
 matfiledata[u'Truth'] = label_test 
-hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Spectral_Loss_Eulerstep_lead'+str(lead)+'.mat', matlab_compatible=True)
+hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Spectral_Loss_PECstep_'+'lambda_reg_'+str(lamda_reg)+'_lead'+str(lead)+'.mat', matlab_compatible=True)
 
 print('Saved Predictions')
 

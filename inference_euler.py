@@ -14,20 +14,15 @@ import hdf5storage
 import pickle
 
 
+path_outputs = '/media/volume/sdb/RK4_analysis/KS_stuff/new_outputs/'
 
-path_outputs = '/home/exouser/RK4_analysis/KS_stuff/new_outputs/'
-
-with open('/home/exouser/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
+with open('/media/volume/sdb/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
     data = pickle.load(f)
 
 
 data=np.asarray(data[:,100000:])
-
-
 lead=1
-
-inf_fac = 10
-time_step = inf_fac*(1e-3)
+time_step = 1e-3
 trainN=80000
 input_size = 512
 output_size = 512
@@ -56,6 +51,19 @@ def Eulerstep(net,input_batch):
 def directstep(net,input_batch):
   output_1 = net(input_batch.cuda())
   return output_1
+
+
+def PEC4step(net,input_batch):
+ output_1 = time_step*net(input_batch.cuda()) + input_batch.cuda()
+ output_2 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_1))
+ output_3 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_2))
+ return input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_3))
+
+
+
+
+
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -100,30 +108,30 @@ mynet = Net()
 count_parameters(mynet)
 mynet.cuda()
 
-mynet.load_state_dict(torch.load('BNN_Eulerstep_lead'+str(lead)+'.pt'))
+mynet.load_state_dict(torch.load('BNN_Spectral_Loss_with_tendencyfft_lambda_reg5_PEC4step_lead'+str(lead)+'.pt'))
 
 
 
-M=20000
+M=80000
 
 pred = np.zeros([M,np.size(label_test,1)])
 for k in range(0,M):
-
+    print('iteration',k)
     if (k==0):
 
-        out = Eulerstep(mynet,input_test_torch[0,:])
+        out = PEC4step(mynet,input_test_torch[0,:])
         pred [k,:] = out.detach().cpu().numpy()
 
     else:
 
-        out = Eulerstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
+        out = PEC4step(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
 
         pred [k,:] = out.detach().cpu().numpy()
 
 matfiledata = {}
 matfiledata[u'prediction'] = pred
 matfiledata[u'Truth'] = label_test
-hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Eulerstep_inf_fac_'+str(inf_fac)+'_lead'+str(lead)+'.mat', matlab_compatible=True)
+hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_longrun_PEC4step_lead'+str(lead)+'.mat', matlab_compatible=True)
 
 print('Saved Predictions')
 

@@ -14,9 +14,9 @@ import hdf5storage
 import pickle
 
 
-path_outputs = '/home/exouser/RK4_analysis/KS_stuff/new_outputs/'
+path_outputs = '/media/volume/sdb/RK4_analysis/KS_stuff/new_outputs/'
 
-with open('/home/exouser/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
+with open('/media/volume/sdb/RK4_analysis/KS_stuff/models/save/KS.pkl', 'rb') as f:
     data = pickle.load(f)
 
 
@@ -30,6 +30,10 @@ hidden_layer_size = 1000
 input_train_torch = torch.from_numpy(np.transpose(data[:,0:trainN])).float().cuda()
 label_train_torch = torch.from_numpy(np.transpose(data[:,lead:lead+trainN])).float().cuda()
 
+du_label_torch = input_train_torch - label_train_torch
+
+
+
 input_test_torch = torch.from_numpy(np.transpose(data[:,trainN:])).float().cuda()
 label_test_torch = torch.from_numpy(np.transpose(data[:,trainN+lead:])).float().cuda()
 label_test = np.transpose(data[:,trainN+lead:])
@@ -37,7 +41,7 @@ label_test = np.transpose(data[:,trainN+lead:])
 
 
 
-def spectral_loss (output, target):
+def spectral_loss (output, output2, target,tendency):
 
    loss1 = torch.mean((output-target)**2)
    
@@ -46,7 +50,13 @@ def spectral_loss (output, target):
    
    loss2 = torch.mean(torch.abs(out_fft[:,wavenum_init:] - target_fft[:,wavenum_init:]))
 
-   loss = (1-lamda_reg)*loss1 + 100*lamda_reg*loss2
+
+   out_du_fft =torch.fft.rfft((output-output2)/time_step,dim=1)
+   target_du_fft =torch.fft.rfft(tendency/time_step,dim=1)
+
+   loss3 = torch.mean(torch.abs(out_du_fft[:,0:]-target_du_fft[:,0:]))
+
+   loss = loss1 + lamda_reg*loss3
   
    return loss
 
@@ -67,6 +77,19 @@ def Eulerstep(net,input_batch):
 def directstep(net,input_batch):
   output_1 = net(input_batch.cuda())
   return output_1
+
+def PECstep(net,input_batch):
+ output_1 = time_step*net(input_batch.cuda()) + input_batch.cuda()
+ return input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_1))
+
+
+def PEC4step(net,input_batch):
+ output_1 = time_step*net(input_batch.cuda()) + input_batch.cuda()
+ output_2 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_1))
+ output_3 = input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_2))
+ return input_batch.cuda() + time_step*0.5*(net(input_batch.cuda())+net(output_3))
+
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -108,11 +131,13 @@ class Net(nn.Module):
 
 
 mynet = Net()
+#mynet.load_state_dict(torch.load('BNN_Spectral_Loss_lambda_reg1.0_PECstep_lead1.pt'))
+mynet.load_state_dict(torch.load('BNN_Spectral_Loss_with_tendencyfft_lambda_reg5_PECstep_lead1.pt'))
 count_parameters(mynet)
 mynet.cuda()
-epochs = 600
-wavenum_init = 60
-lamda_reg = 0.20
+epochs = 60
+wavenum_init = 100
+lamda_reg = 5 
 loss_fn = nn.MSELoss()
 #use two optimizers.  learing rates seem to work.
 optimizer = optim.SGD(mynet.parameters(), lr=0.005)
@@ -125,22 +150,23 @@ for ep in range(0, epochs+1):
 #      epoch_loss=0
       for step in range(0,trainN,batch_size):
         indices = np.random.permutation(np.arange(start=step, step=1,stop=step+batch_size))
-        input_batch, label_batch = input_train_torch[indices], label_train_torch[indices]
+        input_batch, label_batch, du_label_batch = input_train_torch[indices], label_train_torch[indices], du_label_torch[indices]
  #       print('shape of input_batch',input_batch.shape)
         #pick a random boundary batch
         optimizer.zero_grad()
-        outputs = Eulerstep(mynet,input_batch)
-        loss = spectral_loss(outputs,label_batch)
+        outputs = PEC4step(mynet,input_batch)
+        outputs2 = PEC4step(mynet,outputs)
+        loss = spectral_loss(outputs,outputs2,label_batch,du_label_batch)
   
         loss.backward(retain_graph=True)
         optimizer.step()
    #     epoch_loss = epoch_loss + loss
-        if ep % 100 == 0:
+        if ep % 10 == 0:
           print('step',step)
           print('Epoch', ep)
           print ('Loss', loss)
 
-torch.save(mynet.state_dict(),'BNN_Spectral_Loss_Eulerstep_lead'+str(lead)+'.pt') 
+torch.save(mynet.state_dict(),'BNN_Spectral_Loss_with_tendencyfft_'+'lambda_reg'+str(lamda_reg)+'_PEC4step_lead'+str(lead)+'.pt') 
 
 
 M=20000
@@ -149,19 +175,19 @@ for k in range(0,M):
  
     if (k==0):
 
-        out = Eulerstep(mynet,input_test_torch[0,:])
+        out = PEC4step(mynet,input_test_torch[0,:])
         pred [k,:] = out.detach().cpu().numpy()
 
     else:
 
-        out = Eulerstep(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
+        out = PEC4step(mynet,torch.from_numpy(pred[k-1,:]).float().cuda())
 
         pred [k,:] = out.detach().cpu().numpy()
 
 matfiledata = {}
 matfiledata[u'prediction'] = pred
 matfiledata[u'Truth'] = label_test 
-hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Spectral_Loss_Eulerstep_lead'+str(lead)+'.mat', matlab_compatible=True)
+hdf5storage.write(matfiledata, '.', path_outputs+'predicted_KS_Spectral_Loss_with_tendencyfft_PEC4step_'+'lambda_reg_'+str(lamda_reg)+'_lead'+str(lead)+'.mat', matlab_compatible=True)
 
 print('Saved Predictions')
 
